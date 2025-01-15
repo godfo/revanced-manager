@@ -1,19 +1,20 @@
 // ignore_for_file: use_build_context_synchronously
+import 'dart:math';
+
 import 'package:device_apps/device_apps.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_i18n/flutter_i18n.dart';
 import 'package:intl/intl.dart';
 import 'package:revanced_manager/app/app.locator.dart';
+import 'package:revanced_manager/gen/strings.g.dart';
 import 'package:revanced_manager/models/patched_application.dart';
 import 'package:revanced_manager/services/manager_api.dart';
 import 'package:revanced_manager/services/patcher_api.dart';
 import 'package:revanced_manager/services/root_api.dart';
 import 'package:revanced_manager/services/toast.dart';
 import 'package:revanced_manager/ui/views/home/home_viewmodel.dart';
+import 'package:revanced_manager/ui/views/installer/installer_viewmodel.dart';
 import 'package:revanced_manager/ui/views/navigation/navigation_viewmodel.dart';
 import 'package:revanced_manager/ui/views/patcher/patcher_viewmodel.dart';
-import 'package:revanced_manager/ui/widgets/shared/custom_material_button.dart';
-import 'package:revanced_manager/utils/string.dart';
 import 'package:stacked/stacked.dart';
 
 class AppInfoViewModel extends BaseViewModel {
@@ -22,23 +23,36 @@ class AppInfoViewModel extends BaseViewModel {
   final RootAPI _rootAPI = RootAPI();
   final Toast _toast = locator<Toast>();
 
+  Future<void> installApp(
+    BuildContext context,
+    PatchedApplication app,
+  ) async {
+    locator<PatcherViewModel>().selectedApp = app;
+    locator<InstallerViewModel>().installTypeDialog(context);
+  }
+
+  Future<void> exportApp(
+    PatchedApplication app,
+  ) async {
+    _patcherAPI.exportPatchedFile(app);
+  }
+
   Future<void> uninstallApp(
     BuildContext context,
     PatchedApplication app,
     bool onlyUnpatch,
   ) async {
-    bool isUninstalled = true;
-    if (app.isRooted) {
-      final bool hasRootPermissions = await _rootAPI.hasRootPermissions();
-      if (hasRootPermissions) {
-        await _rootAPI.deleteApp(app.packageName, app.apkFilePath);
-        if (!onlyUnpatch) {
-          await DeviceApps.uninstallApp(app.packageName);
-        }
-      }
-    } else {
+    var isUninstalled = onlyUnpatch;
+
+    if (!onlyUnpatch) {
+      // TODO(Someone): Wait for the app to uninstall successfully.
       isUninstalled = await DeviceApps.uninstallApp(app.packageName);
     }
+
+    if (isUninstalled && app.isRooted && await _rootAPI.hasRootPermissions()) {
+      await _rootAPI.uninstall(app.packageName);
+    }
+
     if (isUninstalled) {
       await _managerAPI.deletePatchedApp(app);
       locator<HomeViewModel>().initialize(context);
@@ -54,7 +68,7 @@ class AppInfoViewModel extends BaseViewModel {
   }
 
   void updateNotImplemented(BuildContext context) {
-    _toast.showBottom('appInfoView.updateNotImplemented');
+    _toast.showBottom(t.appInfoView.updateNotImplemented);
   }
 
   Future<void> showUninstallDialog(
@@ -67,14 +81,13 @@ class AppInfoViewModel extends BaseViewModel {
       return showDialog(
         context: context,
         builder: (context) => AlertDialog(
-          title: I18nText('appInfoView.rootDialogTitle'),
-          backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
-          content: I18nText('appInfoView.rootDialogText'),
+          title: Text(t.appInfoView.rootDialogTitle),
+          content: Text(t.appInfoView.rootDialogText),
           actions: <Widget>[
-            CustomMaterialButton(
-              label: I18nText('okButton'),
+            FilledButton(
               onPressed: () => Navigator.of(context).pop(),
-            )
+              child: Text(t.okButton),
+            ),
           ],
         ),
       );
@@ -83,35 +96,77 @@ class AppInfoViewModel extends BaseViewModel {
         return showDialog(
           context: context,
           builder: (context) => AlertDialog(
-            title: I18nText(
-              'appInfoView.unpatchButton',
-            ),
-            backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
-            content: I18nText(
-              'appInfoView.unpatchDialogText',
-            ),
+            title: Text(t.appInfoView.unmountButton),
+            content: Text(t.appInfoView.unmountDialogText),
             actions: <Widget>[
-              CustomMaterialButton(
-                isFilled: false,
-                label: I18nText('noButton'),
+              TextButton(
                 onPressed: () => Navigator.of(context).pop(),
+                child: Text(t.noButton),
               ),
-              CustomMaterialButton(
-                label: I18nText('yesButton'),
+              FilledButton(
                 onPressed: () {
-                  uninstallApp(context, app, onlyUnpatch);
+                  uninstallApp(context, app, true);
                   Navigator.of(context).pop();
                   Navigator.of(context).pop();
                 },
-              )
+                child: Text(t.yesButton),
+              ),
             ],
           ),
         );
       } else {
-        uninstallApp(context, app, onlyUnpatch);
-        Navigator.of(context).pop();
+        return showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(t.appInfoView.uninstallButton),
+            content: Text(t.appInfoView.uninstallDialogText),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text(t.noButton),
+              ),
+              FilledButton(
+                onPressed: () {
+                  uninstallApp(context, app, false);
+                  Navigator.of(context).pop();
+                  Navigator.of(context).pop();
+                },
+                child: Text(t.yesButton),
+              ),
+            ],
+          ),
+        );
       }
     }
+  }
+
+  Future<void> showDeleteDialog(
+    BuildContext context,
+    PatchedApplication app,
+  ) async {
+    return showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(t.appInfoView.removeAppDialogTitle),
+        content: Text(t.appInfoView.removeAppDialogText),
+        actions: <Widget>[
+          TextButton(
+            child: Text(t.cancelButton),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          FilledButton(
+            child: Text(t.okButton),
+            onPressed: () => {
+              _managerAPI.deleteLastPatchedApp(),
+              Navigator.of(context)
+                ..pop()
+                ..pop(),
+              locator<HomeViewModel>().initialize(context),
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   String getPrettyDate(BuildContext context, DateTime dateTime) {
@@ -124,6 +179,12 @@ class AppInfoViewModel extends BaseViewModel {
         .format(dateTime);
   }
 
+  String getFileSizeString(int bytes) {
+    const suffixes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    final i = (log(bytes) / log(1024)).floor();
+    return '${(bytes / pow(1024, i)).toStringAsFixed(2)} ${suffixes[i]}';
+  }
+
   Future<void> showAppliedPatchesDialog(
     BuildContext context,
     PatchedApplication app,
@@ -131,33 +192,22 @@ class AppInfoViewModel extends BaseViewModel {
     return showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: I18nText('appInfoView.appliedPatchesLabel'),
-        backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+        title: Text(t.appInfoView.appliedPatchesLabel),
         content: SingleChildScrollView(
           child: Text(getAppliedPatchesString(app.appliedPatches)),
         ),
         actions: <Widget>[
-          CustomMaterialButton(
-            label: I18nText('okButton'),
+          FilledButton(
             onPressed: () => Navigator.of(context).pop(),
-          )
+            child: Text(t.okButton),
+          ),
         ],
       ),
     );
   }
 
   String getAppliedPatchesString(List<String> appliedPatches) {
-    final List<String> names = appliedPatches
-        .map(
-          (p) => p
-              .replaceAll('-', ' ')
-              .split('-')
-              .join(' ')
-              .toTitleCase()
-              .replaceFirst('Microg', 'MicroG'),
-        )
-        .toList();
-    return '\u2022 ${names.join('\n\u2022 ')}';
+    return '• ${appliedPatches.join('\n• ')}';
   }
 
   void openApp(PatchedApplication app) {

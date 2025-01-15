@@ -1,36 +1,38 @@
 import 'dart:io';
 
 import 'package:collection/collection.dart';
-import 'package:cr_file_saver/file_saver.dart';
 import 'package:device_apps/device_apps.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_file_dialog/flutter_file_dialog.dart';
 import 'package:injectable/injectable.dart';
-import 'package:install_plugin/install_plugin.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:revanced_manager/app/app.locator.dart';
+import 'package:revanced_manager/gen/strings.g.dart';
 import 'package:revanced_manager/models/patch.dart';
 import 'package:revanced_manager/models/patched_application.dart';
 import 'package:revanced_manager/services/manager_api.dart';
 import 'package:revanced_manager/services/root_api.dart';
-import 'package:share_extend/share_extend.dart';
+import 'package:share_plus/share_plus.dart';
 
 @lazySingleton
 class PatcherAPI {
-  static const patcherChannel =
-      MethodChannel('app.revanced.manager.flutter/patcher');
+  static const patcherChannel = MethodChannel('app.revanced.manager.flutter/patcher');
   final ManagerAPI _managerAPI = locator<ManagerAPI>();
   final RootAPI _rootAPI = RootAPI();
   late Directory _dataDir;
   late Directory _tmpDir;
   late File _keyStoreFile;
   List<Patch> _patches = [];
+  List<Patch> _universalPatches = [];
+  Set<String> _compatiblePackages = {};
   Map filteredPatches = <String, List<Patch>>{};
-  File? _outFile;
+  File? outFile;
 
   Future<void> initialize() async {
-    await _loadPatches();
-    final Directory appCache = await getTemporaryDirectory();
+    await loadPatches();
+    final Directory appCache = await getApplicationSupportDirectory();
     _dataDir = await getExternalStorageDirectory() ?? appCache;
     _tmpDir = Directory('${appCache.path}/patcher');
     _keyStoreFile = File('${_dataDir.path}/revanced-manager.keystore');
@@ -43,15 +45,34 @@ class PatcherAPI {
     }
   }
 
-  Future<void> _loadPatches() async {
+  Set<String> getCompatiblePackages() {
+    final Set<String> compatiblePackages = {};
+    for (final Patch patch in _patches) {
+      for (final Package package in patch.compatiblePackages) {
+        if (!compatiblePackages.contains(package.name)) {
+          compatiblePackages.add(package.name);
+        }
+      }
+    }
+    return compatiblePackages;
+  }
+
+  List<Patch> getUniversalPatches() {
+    return _patches.where((patch) => patch.compatiblePackages.isEmpty).toList();
+  }
+
+  Future<void> loadPatches() async {
     try {
       if (_patches.isEmpty) {
         _patches = await _managerAPI.getPatches();
+        _universalPatches = getUniversalPatches();
+        _compatiblePackages = getCompatiblePackages();
       }
     } on Exception catch (e) {
       if (kDebugMode) {
         print(e);
       }
+
       _patches = List.empty();
     }
   }
@@ -61,41 +82,33 @@ class PatcherAPI {
   ) async {
     final List<ApplicationWithIcon> filteredApps = [];
     final bool allAppsIncluded =
-        _patches.any((patch) => patch.compatiblePackages.isEmpty) &&
-            showUniversalPatches;
+        _universalPatches.isNotEmpty && showUniversalPatches;
+
     if (allAppsIncluded) {
-      final allPackages = await DeviceApps.getInstalledApplications(
+      final appList = await DeviceApps.getInstalledApplications(
         includeAppIcons: true,
         onlyAppsWithLaunchIntent: true,
       );
-      for (final pkg in allPackages) {
-        if (!filteredApps.any((app) => app.packageName == pkg.packageName)) {
-          final appInfo = await DeviceApps.getApp(
-            pkg.packageName,
-            true,
-          ) as ApplicationWithIcon?;
-          if (appInfo != null) {
-            filteredApps.add(appInfo);
-          }
-        }
+
+      for (final app in appList) {
+        filteredApps.add(app as ApplicationWithIcon);
       }
     }
-    for (final Patch patch in _patches) {
-      for (final Package package in patch.compatiblePackages) {
-        try {
-          if (!filteredApps.any((app) => app.packageName == package.name)) {
-            final ApplicationWithIcon? app = await DeviceApps.getApp(
-              package.name,
-              true,
-            ) as ApplicationWithIcon?;
-            if (app != null) {
-              filteredApps.add(app);
-            }
+
+    for (final packageName in _compatiblePackages) {
+      try {
+        if (!filteredApps.any((app) => app.packageName == packageName)) {
+          final ApplicationWithIcon? app = await DeviceApps.getApp(
+            packageName,
+            true,
+          ) as ApplicationWithIcon?;
+          if (app != null) {
+            filteredApps.add(app);
           }
-        } on Exception catch (e) {
-          if (kDebugMode) {
-            print(e);
-          }
+        }
+      } on Exception catch (e) {
+        if (kDebugMode) {
+          print(e);
         }
       }
     }
@@ -103,16 +116,24 @@ class PatcherAPI {
   }
 
   List<Patch> getFilteredPatches(String packageName) {
-    if (!filteredPatches.keys.contains(packageName)) {
-      final List<Patch> patches = _patches
-          .where(
-            (patch) =>
-                patch.compatiblePackages.isEmpty ||
-                !patch.name.contains('settings') &&
-                    patch.compatiblePackages
-                        .any((pack) => pack.name == packageName),
-          )
+    if (!_compatiblePackages.contains(packageName)) {
+      return _universalPatches;
+    }
+
+    final List<Patch> patches = _patches
+        .where(
+          (patch) =>
+              patch.compatiblePackages.isEmpty ||
+              !patch.name.contains('settings') &&
+                  patch.compatiblePackages
+                      .any((pack) => pack.name == packageName),
+        )
+        .toList();
+    if (!_managerAPI.areUniversalPatchesEnabled()) {
+      filteredPatches[packageName] = patches
+          .where((patch) => patch.compatiblePackages.isNotEmpty)
           .toList();
+    } else {
       filteredPatches[packageName] = patches;
     }
     return filteredPatches[packageName];
@@ -126,116 +147,233 @@ class PatcherAPI {
         .toList();
   }
 
-  Future<bool> needsResourcePatching(
-    List<Patch> selectedPatches,
-  ) async {
-    return selectedPatches.any(
-      (patch) => patch.dependencies.any(
-        (dep) => dep.contains('resource-'),
-      ),
-    );
-  }
-
-  Future<bool> needsSettingsPatch(List<Patch> selectedPatches) async {
-    return selectedPatches.any(
-      (patch) => patch.dependencies.any(
-        (dep) => dep.contains('settings'),
-      ),
-    );
-  }
-
   Future<void> runPatcher(
     String packageName,
     String apkFilePath,
     List<Patch> selectedPatches,
+    bool isFromStorage,
   ) async {
-    final bool includeSettings = await needsSettingsPatch(selectedPatches);
-    if (includeSettings) {
-      try {
-        final Patch? settingsPatch = _patches.firstWhereOrNull(
-          (patch) =>
-              patch.name.contains('settings') &&
-              patch.compatiblePackages.any((pack) => pack.name == packageName),
-        );
-        if (settingsPatch != null) {
-          selectedPatches.add(settingsPatch);
+    final Map<String, Map<String, dynamic>> options = {};
+    for (final patch in selectedPatches) {
+      if (patch.options.isNotEmpty) {
+        final Map<String, dynamic> patchOptions = {};
+        for (final option in patch.options) {
+          final patchOption =
+              _managerAPI.getPatchOption(packageName, patch.name, option.key);
+          if (patchOption != null) {
+            patchOptions[patchOption.key] = patchOption.value;
+          }
         }
-      } on Exception catch (e) {
-        if (kDebugMode) {
-          print(e);
-        }
+        options[patch.name] = patchOptions;
       }
     }
-    final File? patchBundleFile = await _managerAPI.downloadPatches();
-    final File? integrationsFile = await _managerAPI.downloadIntegrations();
-    if (patchBundleFile != null) {
-      _dataDir.createSync();
-      _tmpDir.createSync();
-      final Directory workDir = _tmpDir.createTempSync('tmp-');
-      final File inputFile = File('${workDir.path}/base.apk');
-      final File patchedFile = File('${workDir.path}/patched.apk');
-      _outFile = File('${workDir.path}/out.apk');
-      final Directory cacheDir = Directory('${workDir.path}/cache');
-      cacheDir.createSync();
-      final String originalFilePath = apkFilePath;
-      try {
-        await patcherChannel.invokeMethod(
-          'runPatcher',
-          {
-            'patchBundleFilePath': patchBundleFile.path,
-            'originalFilePath': originalFilePath,
-            'inputFilePath': inputFile.path,
-            'patchedFilePath': patchedFile.path,
-            'outFilePath': _outFile!.path,
-            'integrationsPath': integrationsFile!.path,
-            'selectedPatches': selectedPatches.map((p) => p.name).toList(),
-            'cacheDirPath': cacheDir.path,
-            'keyStoreFilePath': _keyStoreFile.path,
-            'keystorePassword': _managerAPI.getKeystorePassword(),
-          },
-        );
-      } on Exception catch (e) {
-        if (kDebugMode) {
-          print(e);
-        }
+
+    _dataDir.createSync();
+    _tmpDir.createSync();
+    final Directory workDir = await _tmpDir.createTemp('tmp-');
+
+    final File inApkFile = File('${workDir.path}/in.apk');
+    await File(apkFilePath).copy(inApkFile.path);
+
+    outFile = File('${workDir.path}/out.apk');
+
+    final Directory tmpDir =
+        Directory('${workDir.path}/revanced-temporary-files');
+
+    try {
+      await patcherChannel.invokeMethod(
+        'runPatcher',
+        {
+          'inFilePath': inApkFile.path,
+          'outFilePath': outFile!.path,
+          'selectedPatches': selectedPatches.map((p) => p.name).toList(),
+          'options': options,
+          'tmpDirPath': tmpDir.path,
+          'keyStoreFilePath': _keyStoreFile.path,
+          'keystorePassword': _managerAPI.getKeystorePassword(),
+        },
+      );
+    } on Exception catch (e) {
+      if (kDebugMode) {
+        print(e);
       }
     }
   }
 
-  Future<bool> installPatchedFile(PatchedApplication patchedApp) async {
-    if (_outFile != null) {
+  Future<void> stopPatcher() async {
+    try {
+      await patcherChannel.invokeMethod('stopPatcher');
+    } on Exception catch (e) {
+      if (kDebugMode) {
+        print(e);
+      }
+    }
+  }
+
+  Future<int> installPatchedFile(
+    BuildContext context,
+    PatchedApplication patchedApp,
+  ) async {
+    if (patchedApp.patchedFilePath != '') {
+      _managerAPI.ctx = context;
       try {
         if (patchedApp.isRooted) {
           final bool hasRootPermissions = await _rootAPI.hasRootPermissions();
-          if (hasRootPermissions) {
-            return _rootAPI.installApp(
+          final packageVersion = await DeviceApps.getApp(patchedApp.packageName)
+              .then((app) => app?.versionName);
+          if (!hasRootPermissions) {
+            installErrorDialog(1);
+          } else if (packageVersion == null) {
+            installErrorDialog(1.2);
+          } else if (packageVersion == patchedApp.version) {
+            return await _rootAPI.install(
               patchedApp.packageName,
               patchedApp.apkFilePath,
-              _outFile!.path,
-            );
+              patchedApp.patchedFilePath,
+            )
+                ? 0
+                : 1;
+          } else {
+            installErrorDialog(1.1);
           }
         } else {
-          final install = await InstallPlugin.installApk(_outFile!.path);
-          return install['isSuccess'];
+          if (await _rootAPI.hasRootPermissions()) {
+            await _rootAPI.uninstall(patchedApp.packageName);
+          }
+          if (context.mounted) {
+            return await installApk(
+              context,
+              patchedApp.patchedFilePath,
+            );
+          }
         }
       } on Exception catch (e) {
         if (kDebugMode) {
           print(e);
         }
-        return false;
       }
     }
-    return false;
+    return 1;
   }
 
-  void exportPatchedFile(String appName, String version) {
+  Future<int> installApk(
+    BuildContext context,
+    String apkPath,
+  ) async {
     try {
-      if (_outFile != null) {
-        final String newName = _getFileName(appName, version);
-        CRFileSaver.saveFileWithDialog(
-          SaveFileDialogParams(
-            sourceFilePath: _outFile!.path,
-            destinationFileName: newName,
+      final status = await patcherChannel.invokeMethod('installApk', {
+        'apkPath': apkPath,
+      });
+      final int statusCode = status['status'];
+      final String message = status['message'];
+      final bool hasExtra =
+          message.contains('INSTALL_FAILED_VERIFICATION_FAILURE') ||
+              message.contains('INSTALL_FAILED_VERSION_DOWNGRADE');
+      if (statusCode == 0 || (statusCode == 3 && !hasExtra)) {
+        return statusCode;
+      } else {
+        _managerAPI.ctx = context;
+        return await installErrorDialog(
+          statusCode,
+          status,
+          hasExtra,
+        );
+      }
+    } on Exception catch (e) {
+      if (kDebugMode) {
+        print(e);
+      }
+      return 3;
+    }
+  }
+
+  Future<int> installErrorDialog(
+    num statusCode, [
+    status,
+    bool hasExtra = false,
+  ]) async {
+    final String statusValue = InstallStatus.byCode(
+      hasExtra ? double.parse('$statusCode.1') : statusCode,
+    );
+    bool cleanInstall = false;
+    final bool isFixable = statusCode == 4 || statusCode == 5;
+
+    var description = t['installErrorDialog.${statusValue}_description'];
+    if (statusCode == 2) {
+      description = description(
+        packageName: statusCode == 2
+            ? {
+                'packageName': status['otherPackageName'],
+              }
+            : null,
+      );
+    }
+
+    await showDialog(
+      context: _managerAPI.ctx!,
+      builder: (context) => AlertDialog(
+        backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+        title: Text(t['installErrorDialog.$statusValue']),
+        content: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(description),
+          ],
+        ),
+        actions: (status == null)
+            ? <Widget>[
+                FilledButton(
+                  onPressed: () async {
+                    Navigator.pop(context);
+                  },
+                  child: Text(t.okButton),
+                ),
+              ]
+            : <Widget>[
+                if (!isFixable)
+                  FilledButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                    },
+                    child: Text(t.cancelButton),
+                  )
+                else
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                    },
+                    child: Text(t.cancelButton),
+                  ),
+                if (isFixable)
+                  FilledButton(
+                    onPressed: () async {
+                      final int response = await patcherChannel.invokeMethod(
+                        'uninstallApp',
+                        {'packageName': status['packageName']},
+                      );
+                      if (response == 0 && context.mounted) {
+                        cleanInstall = true;
+                        Navigator.pop(context);
+                      }
+                    },
+                    child: Text(t.okButton),
+                  ),
+              ],
+      ),
+    );
+    return cleanInstall ? 10 : 1;
+  }
+
+  void exportPatchedFile(PatchedApplication app) {
+    try {
+      if (outFile != null) {
+        final String newName = _getFileName(app.name, app.version);
+        FlutterFileDialog.saveFile(
+          params: SaveFileDialogParams(
+            sourceFilePath: app.patchedFilePath,
+            fileName: newName,
+            mimeTypesFilter: ['application/vnd.android.package-archive'],
           ),
         );
       }
@@ -246,15 +384,15 @@ class PatcherAPI {
     }
   }
 
-  void sharePatchedFile(String appName, String version) {
+  void sharePatchedFile(PatchedApplication app) {
     try {
-      if (_outFile != null) {
-        final String newName = _getFileName(appName, version);
-        final int lastSeparator = _outFile!.path.lastIndexOf('/');
+      if (outFile != null) {
+        final String newName = _getFileName(app.name, app.version);
+        final int lastSeparator = app.patchedFilePath.lastIndexOf('/');
         final String newPath =
-            _outFile!.path.substring(0, lastSeparator + 1) + newName;
-        final File shareFile = _outFile!.copySync(newPath);
-        ShareExtend.share(shareFile.path, 'file');
+            app.patchedFilePath.substring(0, lastSeparator + 1) + newName;
+        final File shareFile = File(app.patchedFilePath).copySync(newPath);
+        Share.shareXFiles([XFile(shareFile.path)]);
       }
     } on Exception catch (e) {
       if (kDebugMode) {
@@ -264,12 +402,14 @@ class PatcherAPI {
   }
 
   String _getFileName(String appName, String version) {
+    final String patchVersion = _managerAPI.patchesVersion!;
     final String prefix = appName.toLowerCase().replaceAll(' ', '-');
-    final String newName = '$prefix-revanced_v$version.apk';
+    final String newName =
+        '$prefix-revanced_v$version-patches_$patchVersion.apk';
     return newName;
   }
 
-  Future<void> sharePatcherLog(String logs) async {
+  Future<void> exportPatcherLog(String logs) async {
     final Directory appCache = await getTemporaryDirectory();
     final Directory logDir = Directory('${appCache.path}/logs');
     logDir.createSync();
@@ -279,10 +419,15 @@ class PatcherAPI {
         .replaceAll(':', '')
         .replaceAll('T', '')
         .replaceAll('.', '');
-    final File log =
-        File('${logDir.path}/revanced-manager_patcher_$dateTime.log');
+    final String fileName = 'revanced-manager_patcher_$dateTime.txt';
+    final File log = File('${logDir.path}/$fileName');
     log.writeAsStringSync(logs);
-    ShareExtend.share(log.path, 'file');
+    FlutterFileDialog.saveFile(
+      params: SaveFileDialogParams(
+        sourceFilePath: log.path,
+        fileName: fileName,
+      ),
+    );
   }
 
   String getSuggestedVersion(String packageName) {
@@ -311,5 +456,62 @@ class PatcherAPI {
       return (versions.keys.toList()..sort()).last;
     }
     return '';
+  }
+}
+
+enum InstallStatus {
+  mountNoRoot(1),
+  mountVersionMismatch(1.1),
+  mountMissingInstallation(1.2),
+  statusFailureBlocked(2),
+  installFailedVerificationFailure(3.1),
+  statusFailureInvalid(4),
+  installFailedVersionDowngrade(4.1),
+  statusFailureConflict(5),
+  statusFailureStorage(6),
+  statusFailureIncompatible(7),
+  statusFailureTimeout(8);
+
+  const InstallStatus(this.statusCode);
+
+  final double statusCode;
+
+  static String byCode(num code) {
+    try {
+      return InstallStatus.values
+          .firstWhere((flag) => flag.statusCode == code)
+          .status;
+    } catch (e) {
+      return 'status_unknown';
+    }
+  }
+}
+
+extension InstallStatusExtension on InstallStatus {
+  String get status {
+    switch (this) {
+      case InstallStatus.mountNoRoot:
+        return 'mount_no_root';
+      case InstallStatus.mountVersionMismatch:
+        return 'mount_version_mismatch';
+      case InstallStatus.mountMissingInstallation:
+        return 'mount_missing_installation';
+      case InstallStatus.statusFailureBlocked:
+        return 'status_failure_blocked';
+      case InstallStatus.installFailedVerificationFailure:
+        return 'install_failed_verification_failure';
+      case InstallStatus.statusFailureInvalid:
+        return 'status_failure_invalid';
+      case InstallStatus.installFailedVersionDowngrade:
+        return 'install_failed_version_downgrade';
+      case InstallStatus.statusFailureConflict:
+        return 'status_failure_conflict';
+      case InstallStatus.statusFailureStorage:
+        return 'status_failure_storage';
+      case InstallStatus.statusFailureIncompatible:
+        return 'status_failure_incompatible';
+      case InstallStatus.statusFailureTimeout:
+        return 'status_failure_timeout';
+    }
   }
 }

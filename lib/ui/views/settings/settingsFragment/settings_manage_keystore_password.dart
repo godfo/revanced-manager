@@ -1,12 +1,10 @@
 // ignore_for_file: use_build_context_synchronously
 
 import 'package:flutter/material.dart';
-import 'package:flutter_i18n/flutter_i18n.dart';
 import 'package:revanced_manager/app/app.locator.dart';
+import 'package:revanced_manager/gen/strings.g.dart';
 import 'package:revanced_manager/services/manager_api.dart';
-import 'package:revanced_manager/ui/widgets/settingsView/custom_text_field.dart';
 import 'package:revanced_manager/ui/widgets/settingsView/settings_tile_dialog.dart';
-import 'package:revanced_manager/ui/widgets/shared/custom_material_button.dart';
 import 'package:stacked/stacked.dart';
 
 class SManageKeystorePassword extends BaseViewModel {
@@ -23,46 +21,49 @@ class SManageKeystorePassword extends BaseViewModel {
       builder: (context) => AlertDialog(
         title: Row(
           children: <Widget>[
-            I18nText('settingsView.selectKeystorePassword'),
-            const Spacer(),
+            Expanded(
+              child: Text(t.settingsView.selectKeystorePassword),
+            ),
             IconButton(
               icon: const Icon(Icons.manage_history_outlined),
               onPressed: () => _keystorePasswordController.text =
                   _managerAPI.defaultKeystorePassword,
               color: Theme.of(context).colorScheme.secondary,
-            )
+            ),
           ],
         ),
-        backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
         content: SingleChildScrollView(
           child: Column(
             children: <Widget>[
-              CustomTextField(
-                inputController: _keystorePasswordController,
-                label: I18nText('settingsView.selectKeystorePassword'),
-                hint: '',
+              TextField(
+                controller: _keystorePasswordController,
+                autocorrect: false,
+                obscureText: true,
                 onChanged: (value) => notifyListeners(),
+                decoration: InputDecoration(
+                  border: const OutlineInputBorder(),
+                  labelText: t.settingsView.selectKeystorePassword,
+                ),
               ),
             ],
           ),
         ),
         actions: <Widget>[
-          CustomMaterialButton(
-            isFilled: false,
-            label: I18nText('cancelButton'),
+          TextButton(
             onPressed: () {
               _keystorePasswordController.clear();
               Navigator.of(context).pop();
             },
+            child: Text(t.cancelButton),
           ),
-          CustomMaterialButton(
-            label: I18nText('okButton'),
+          FilledButton(
             onPressed: () {
               final String passwd = _keystorePasswordController.text;
               _managerAPI.setKeystorePassword(passwd);
               Navigator.of(context).pop();
             },
-          )
+            child: Text(t.okButton),
+          ),
         ],
       ),
     );
@@ -78,8 +79,8 @@ class SManageKeystorePasswordUI extends StatelessWidget {
   Widget build(BuildContext context) {
     return SettingsTileDialog(
       padding: const EdgeInsets.symmetric(horizontal: 20.0),
-      title: 'settingsView.selectKeystorePassword',
-      subtitle: 'settingsView.selectKeystorePasswordHint',
+      title: t.settingsView.selectKeystorePassword,
+      subtitle: t.settingsView.selectKeystorePasswordHint,
       onTap: () => sManageKeystorePassword.showKeystoreDialog(context),
     );
   }
