@@ -3,11 +3,11 @@ import 'package:revanced_manager/ui/widgets/shared/custom_card.dart';
 import 'package:skeletons/skeletons.dart';
 
 class AppSkeletonLoader extends StatelessWidget {
-  const AppSkeletonLoader({Key? key}) : super(key: key);
+  const AppSkeletonLoader({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenWidth = MediaQuery.sizeOf(context).width;
     return ListView.builder(
       shrinkWrap: true,
       itemCount: 7,

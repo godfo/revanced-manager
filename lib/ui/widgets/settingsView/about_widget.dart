@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_i18n/flutter_i18n.dart';
+import 'package:revanced_manager/gen/strings.g.dart';
 import 'package:revanced_manager/utils/about_info.dart';
 
 class AboutWidget extends StatefulWidget {
-  const AboutWidget({Key? key, this.padding}) : super(key: key);
+  const AboutWidget({super.key, this.padding});
 
   final EdgeInsetsGeometry? padding;
 
@@ -34,21 +34,18 @@ class _AboutWidgetState extends State<AboutWidget> {
                     );
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: I18nText('settingsView.snackbarMessage'),
+                        content: Text(t.settingsView.snackbarMessage),
                         backgroundColor:
                             Theme.of(context).colorScheme.secondary,
                       ),
                     );
                   }
                 : null,
-            title: I18nText(
-              'settingsView.aboutLabel',
-              child: const Text(
-                '',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w500,
-                ),
+            title: Text(
+              t.settingsView.aboutLabel,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w500,
               ),
             ),
             subtitle: snapshot.hasData

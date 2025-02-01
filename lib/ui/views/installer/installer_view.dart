@@ -1,170 +1,141 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_i18n/flutter_i18n.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:revanced_manager/gen/strings.g.dart';
 import 'package:revanced_manager/ui/views/installer/installer_viewmodel.dart';
 import 'package:revanced_manager/ui/widgets/installerView/gradient_progress_indicator.dart';
 import 'package:revanced_manager/ui/widgets/shared/custom_card.dart';
-import 'package:revanced_manager/ui/widgets/shared/custom_material_button.dart';
-import 'package:revanced_manager/ui/widgets/shared/custom_popup_menu.dart';
 import 'package:revanced_manager/ui/widgets/shared/custom_sliver_app_bar.dart';
+import 'package:revanced_manager/ui/widgets/shared/haptics/haptic_floating_action_button_extended.dart';
 import 'package:stacked/stacked.dart';
 
 class InstallerView extends StatelessWidget {
-  const InstallerView({Key? key}) : super(key: key);
+  const InstallerView({super.key});
 
   @override
   Widget build(BuildContext context) {
     return ViewModelBuilder<InstallerViewModel>.reactive(
       onViewModelReady: (model) => model.initialize(context),
       viewModelBuilder: () => InstallerViewModel(),
-      builder: (context, model, child) => WillPopScope(
-        child: SafeArea(
-          top: false,
-          bottom: false,
-          child: Scaffold(
-            body: CustomScrollView(
-              controller: model.scrollController,
-              slivers: <Widget>[
-                CustomSliverAppBar(
-                  title: Text(
-                    model.headerLogs,
-                    style: GoogleFonts.inter(
-                      color: Theme.of(context).textTheme.titleLarge!.color,
+      builder: (context, model, child) => PopScope<Object?>(
+        canPop: !model.isPatching,
+        onPopInvokedWithResult: (bool didPop, Object? result) {
+          if (didPop) {
+            model.onPop();
+          } else {
+            model.onPopAttempt(context);
+          }
+        },
+        child: Scaffold(
+          floatingActionButton: Visibility(
+            visible:
+                !model.isPatching && !model.hasErrors && !model.isInstalling,
+            child: HapticFloatingActionButtonExtended(
+              label: Text(
+                model.isInstalled
+                    ? t.installerView.openButton
+                    : t.installerView.installButton,
+              ),
+              icon: model.isInstalled
+                  ? const Icon(Icons.open_in_new)
+                  : const Icon(Icons.file_download_outlined),
+              onPressed: model.isInstalled
+                  ? () => {
+                        model.openApp(),
+                        model.cleanPatcher(),
+                        Navigator.of(context).pop(),
+                      }
+                  : () => model.installTypeDialog(context),
+              elevation: 0,
+            ),
+          ),
+          floatingActionButtonLocation:
+              FloatingActionButtonLocation.endContained,
+          bottomNavigationBar: Visibility(
+            visible: !model.isPatching,
+            child: BottomAppBar(
+              child: Row(
+                children: <Widget>[
+                  Visibility(
+                    visible: !model.hasErrors,
+                    child: IconButton.filledTonal(
+                      tooltip: t.installerView.exportApkButtonTooltip,
+                      icon: const Icon(Icons.save),
+                      onPressed: () => model.onButtonPressed(0),
                     ),
                   ),
-                  onBackButtonPressed: () => model.onWillPop(context),
-                  actions: <Widget>[
-                    Visibility(
-                      visible: !model.isPatching,
-                      child: CustomPopupMenu(
-                        onSelected: (value) => model.onMenuSelection(value),
-                        children: {
-                          if (!model.hasErrors)
-                            0: I18nText(
-                              'installerView.shareApkMenuOption',
-                              child: const Text(
-                                '',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          1: I18nText(
-                            'installerView.exportApkMenuOption',
-                            child: const Text(
-                              '',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                          2: I18nText(
-                            'installerView.shareLogMenuOption',
-                            child: const Text(
-                              '',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        },
+                  IconButton.filledTonal(
+                    tooltip: t.installerView.exportLogButtonTooltip,
+                    icon: const Icon(Icons.post_add),
+                    onPressed: () => model.onButtonPressed(1),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          body: NotificationListener<ScrollNotification>(
+            onNotification: model.handleAutoScrollNotification,
+            child: Scaffold(
+              body: CustomScrollView(
+                key: model.logCustomScrollKey,
+                controller: model.scrollController,
+                slivers: <Widget>[
+                  CustomSliverAppBar(
+                    title: Text(
+                      model.headerLogs,
+                      style: GoogleFonts.inter(
+                        color: Theme.of(context).textTheme.titleLarge!.color,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ],
-                  bottom: PreferredSize(
-                    preferredSize: const Size(double.infinity, 1.0),
-                    child: GradientProgressIndicator(progress: model.progress),
-                  ),
-                ),
-                SliverPadding(
-                  padding: const EdgeInsets.all(20.0),
-                  sliver: SliverList(
-                    delegate: SliverChildListDelegate.fixed(
-                      <Widget>[
-                        CustomCard(
-                          child: Text(
-                            model.logs,
-                            style: GoogleFonts.jetBrainsMono(
-                              fontSize: 13,
-                              height: 1.5,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: Align(
-                    alignment: Alignment.bottomCenter,
-                    child: Visibility(
-                      visible: !model.isPatching && !model.hasErrors,
-                      child: Padding(
-                        padding: const EdgeInsets.all(20.0).copyWith(top: 0.0),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Visibility(
-                              visible: model.isInstalled,
-                              child: CustomMaterialButton(
-                                label: I18nText('installerView.openButton'),
-                                isExpanded: true,
-                                onPressed: () {
-                                  model.openApp();
-                                  model.cleanPatcher();
-                                  Navigator.of(context).pop();
-                                },
-                              ),
-                            ),
-                            Visibility(
-                              visible: !model.isInstalled && model.isRooted,
-                              child: CustomMaterialButton(
-                                isFilled: false,
-                                label:
-                                    I18nText('installerView.installRootButton'),
-                                isExpanded: true,
-                                onPressed: () => model.installResult(
-                                  context,
-                                  true,
-                                ),
-                              ),
-                            ),
-                            Visibility(
-                              visible: !model.isInstalled,
-                              child: const SizedBox(
-                                width: 16,
-                              ),
-                            ),
-                            Visibility(
-                              visible: !model.isInstalled,
-                              child: CustomMaterialButton(
-                                label: I18nText('installerView.installButton'),
-                                isExpanded: true,
-                                onPressed: () => model.installResult(
-                                  context,
-                                  false,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                    onBackButtonPressed: () => Navigator.maybePop(context),
+                    bottom: PreferredSize(
+                      preferredSize: const Size(double.infinity, 1.0),
+                      child: GradientProgressIndicator(
+                        progress: model.progress,
                       ),
                     ),
                   ),
-                ),
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: SizedBox(
-                    height: MediaQuery.of(context).viewPadding.bottom,
+                  SliverPadding(
+                    padding: EdgeInsets.only(
+                      left: 20,
+                      right: 20,
+                      top: 20,
+                      bottom: MediaQuery.paddingOf(context).bottom,
+                    ),
+                    sliver: SliverList(
+                      delegate: SliverChildListDelegate.fixed(
+                        <Widget>[
+                          CustomCard(
+                            child: Text(
+                              model.logs,
+                              style: GoogleFonts.jetBrainsMono(
+                                fontSize: 13,
+                                height: 1.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              floatingActionButtonLocation:
+                  FloatingActionButtonLocation.endDocked,
+              floatingActionButton: Visibility(
+                visible: model.showAutoScrollButton,
+                child: Align(
+                  alignment: const Alignment(1, 0.85),
+                  child: FloatingActionButton(
+                    onPressed: model.scrollToBottom,
+                    child: const Icon(Icons.arrow_downward_rounded),
                   ),
                 ),
-              ],
+              ),
             ),
           ),
         ),
-        onWillPop: () => model.onWillPop(context),
       ),
     );
   }

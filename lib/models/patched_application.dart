@@ -9,23 +9,21 @@ class PatchedApplication {
   PatchedApplication({
     required this.name,
     required this.packageName,
-    required this.originalPackageName,
     required this.version,
     required this.apkFilePath,
     required this.icon,
     required this.patchDate,
     this.isRooted = false,
     this.isFromStorage = false,
-    this.hasUpdates = false,
     this.appliedPatches = const [],
-    this.changelog = const [],
+    this.patchedFilePath = '',
+    this.fileSize = 0,
   });
 
   factory PatchedApplication.fromJson(Map<String, dynamic> json) =>
       _$PatchedApplicationFromJson(json);
   String name;
   String packageName;
-  String originalPackageName;
   String version;
   final String apkFilePath;
   @JsonKey(
@@ -36,9 +34,9 @@ class PatchedApplication {
   DateTime patchDate;
   bool isRooted;
   bool isFromStorage;
-  bool hasUpdates;
   List<String> appliedPatches;
-  List<String> changelog;
+  String patchedFilePath;
+  int fileSize;
 
   Map<String, dynamic> toJson() => _$PatchedApplicationToJson(this);
 

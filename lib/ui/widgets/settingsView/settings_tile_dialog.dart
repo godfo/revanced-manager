@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_i18n/flutter_i18n.dart';
 
 class SettingsTileDialog extends StatelessWidget {
   const SettingsTileDialog({
-    Key? key,
+    super.key,
     required this.title,
     required this.subtitle,
     required this.onTap,
     this.padding,
-  }) : super(key: key);
+  });
   final String title;
   final String subtitle;
   final Function()? onTap;
@@ -18,17 +17,14 @@ class SettingsTileDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       contentPadding: padding ?? EdgeInsets.zero,
-      title: I18nText(
+      title: Text(
         title,
-        child: const Text(
-          '',
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w500,
-          ),
+        style: const TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.w500,
         ),
       ),
-      subtitle: I18nText(subtitle),
+      subtitle: Text(subtitle),
       onTap: onTap,
     );
   }

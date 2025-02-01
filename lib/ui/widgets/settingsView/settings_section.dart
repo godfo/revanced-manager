@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_i18n/flutter_i18n.dart';
 
 class SettingsSection extends StatelessWidget {
   const SettingsSection({
-    Key? key,
+    super.key,
     required this.title,
     required this.children,
-  }) : super(key: key);
+  });
   final String title;
   final List<Widget> children;
 
@@ -17,13 +16,10 @@ class SettingsSection extends StatelessWidget {
       children: <Widget>[
         Container(
           padding: const EdgeInsets.only(top: 16.0, bottom: 10.0, left: 20.0),
-          child: I18nText(
+          child: Text(
             title,
-            child: Text(
-              '',
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.primary,
-              ),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.primary,
             ),
           ),
         ),

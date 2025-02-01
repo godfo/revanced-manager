@@ -1,6 +1,6 @@
 # 🛠️ Usage
 
-The following pages will guide you through using ReVanced Manager to patch apps, manage patched apps, and update ReVanced Manager.
+Learn how to use ReVanced Manager to manage and patch apps or update ReVanced Manager.
 
 ## 📖 Table of contents
 
@@ -11,6 +11,6 @@ The following pages will guide you through using ReVanced Manager to patch apps,
 
 ## ⏭️ What's next
 
-The next page will guide you through troubleshooting ReVanced Manager.
+The next page will explain how to use ReVanced Manager to patch apps.
 
-Continue: [🛟 Troubleshooting](3_troubleshooting.md)
+Continue: [🧩 Patching apps](2_1_patching.md)
