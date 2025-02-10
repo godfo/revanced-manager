@@ -1,25 +1,25 @@
 import 'dart:io';
 
 import 'package:device_apps/device_apps.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_i18n/flutter_i18n.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_file_dialog/flutter_file_dialog.dart';
 import 'package:revanced_manager/app/app.locator.dart';
+import 'package:revanced_manager/gen/strings.g.dart';
 import 'package:revanced_manager/models/patch.dart';
 import 'package:revanced_manager/models/patched_application.dart';
 import 'package:revanced_manager/services/manager_api.dart';
 import 'package:revanced_manager/services/patcher_api.dart';
-import 'package:revanced_manager/services/revanced_api.dart';
 import 'package:revanced_manager/services/toast.dart';
 import 'package:revanced_manager/ui/views/patcher/patcher_viewmodel.dart';
-import 'package:revanced_manager/ui/widgets/shared/custom_material_button.dart';
+import 'package:revanced_manager/utils/about_info.dart';
+import 'package:revanced_manager/utils/check_for_supported_patch.dart';
 import 'package:stacked/stacked.dart';
 
 class AppSelectorViewModel extends BaseViewModel {
   final PatcherAPI _patcherAPI = locator<PatcherAPI>();
   final ManagerAPI _managerAPI = locator<ManagerAPI>();
-  final RevancedAPI _revancedAPI = locator<RevancedAPI>();
   final Toast _toast = locator<Toast>();
   final List<ApplicationWithIcon> apps = [];
   List<String> allApps = [];
@@ -32,7 +32,7 @@ class AppSelectorViewModel extends BaseViewModel {
   List<Patch> patches = [];
 
   Future<void> initialize() async {
-    patches = await _revancedAPI.getPatches();
+    patches = await _managerAPI.getPatches();
     isRooted = _managerAPI.isRooted;
 
     apps.addAll(
@@ -55,7 +55,7 @@ class AppSelectorViewModel extends BaseViewModel {
         .toSet()
         .where((name) => !apps.any((app) => app.packageName == name))
         .toList();
-    noApps = allApps.isEmpty;
+    noApps = allApps.isEmpty && apps.isEmpty;
     return allApps;
   }
 
@@ -71,17 +71,70 @@ class AppSelectorViewModel extends BaseViewModel {
     return true;
   }
 
-  Future<void> selectApp(ApplicationWithIcon application) async {
+  Future<void> searchSuggestedVersionOnWeb({
+    required String packageName,
+  }) async {
+    final String suggestedVersion = getSuggestedVersion(packageName);
+    final String architecture = await AboutInfo.getInfo().then((info) {
+      return info['supportedArch'][0];
+    });
+
+    if (suggestedVersion.isNotEmpty) {
+      await openDefaultBrowser('$packageName apk version $suggestedVersion $architecture');
+    } else {
+      await openDefaultBrowser('$packageName apk $architecture');
+    }
+  }
+
+  Future<void> openDefaultBrowser(String query) async {
+    if (Platform.isAndroid) {
+      try {
+        const platform = MethodChannel('app.revanced.manager.flutter/browser');
+        await platform.invokeMethod('openBrowser', {'query': query});
+      } catch (e) {
+        if (kDebugMode) {
+          print(e);
+        }
+      }
+    } else {
+      throw 'Platform not supported';
+    }
+  }
+
+  Future<void> selectApp(
+    BuildContext context,
+    ApplicationWithIcon application, [
+    bool isFromStorage = false,
+  ]) async {
+    final String suggestedVersion =
+        getSuggestedVersion(application.packageName);
+    if (application.versionName != suggestedVersion &&
+        suggestedVersion.isNotEmpty) {
+      _managerAPI.suggestedAppVersionSelected = false;
+      if (_managerAPI.isRequireSuggestedAppVersionEnabled() &&
+          context.mounted) {
+        return showRequireSuggestedAppVersionDialog(
+          context,
+          application.versionName!,
+          suggestedVersion,
+        );
+      }
+    } else {
+      _managerAPI.suggestedAppVersionSelected = true;
+    }
     locator<PatcherViewModel>().selectedApp = PatchedApplication(
       name: application.appName,
       packageName: application.packageName,
-      originalPackageName: application.packageName,
       version: application.versionName!,
       apkFilePath: application.apkFilePath,
       icon: application.icon,
       patchDate: DateTime.now(),
+      isFromStorage: isFromStorage,
     );
-    locator<PatcherViewModel>().loadLastSelectedPatches();
+    await locator<PatcherViewModel>().loadLastSelectedPatches();
+    if (context.mounted) {
+      Navigator.pop(context);
+    }
   }
 
   Future<void> canSelectInstalled(
@@ -91,19 +144,59 @@ class AppSelectorViewModel extends BaseViewModel {
     final app =
         await DeviceApps.getApp(packageName, true) as ApplicationWithIcon?;
     if (app != null) {
-      if (await checkSplitApk(packageName) && !isRooted) {
-        return showSelectFromStorageDialog(context);
-      } else if (!await checkSplitApk(packageName) || isRooted) {
-        selectApp(app);
-        Navigator.pop(context);
+      final bool isSplitApk = await checkSplitApk(packageName);
+      if (isRooted || !isSplitApk) {
+        if (context.mounted) {
+          await selectApp(context, app);
+        }
+        final List<Option> requiredNullOptions = getNullRequiredOptions(
+          locator<PatcherViewModel>().selectedPatches,
+          packageName,
+        );
+        if (requiredNullOptions.isNotEmpty) {
+          locator<PatcherViewModel>().showRequiredOptionDialog();
+        }
+      } else {
+        if (context.mounted) {
+          return showSelectFromStorageDialog(context);
+        }
       }
     }
+  }
+
+  Future showRequireSuggestedAppVersionDialog(
+    BuildContext context,
+    String selectedVersion,
+    String suggestedVersion,
+  ) async {
+    return showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(t.warning),
+        content: Text(
+          t.appSelectorView.requireSuggestedAppVersionDialogText(
+            suggested: suggestedVersion,
+            selected: selectedVersion,
+          ),
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(t.okButton),
+          ),
+        ],
+      ),
+    );
   }
 
   Future showSelectFromStorageDialog(BuildContext context) async {
     return showDialog(
       context: context,
-      builder: (context) => SimpleDialog(
+      builder: (innerContext) => SimpleDialog(
         alignment: Alignment.center,
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
@@ -112,59 +205,50 @@ class AppSelectorViewModel extends BaseViewModel {
           Icon(
             Icons.block,
             size: 28,
-            color: Theme.of(context).colorScheme.primary,
+            color: Theme.of(innerContext).colorScheme.primary,
           ),
           const SizedBox(height: 20),
-          I18nText(
-            'appSelectorView.featureNotAvailable',
-            child: const Text(
-              '',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w600,
-                wordSpacing: 1.5,
-              ),
+          Text(
+            t.appSelectorView.featureNotAvailable,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+              wordSpacing: 1.5,
             ),
           ),
           const SizedBox(height: 20),
-          I18nText(
-            'appSelectorView.featureNotAvailableText',
-            child: const Text(
-              '',
-              style: TextStyle(
-                fontSize: 14,
-              ),
+          Text(
+            t.appSelectorView.featureNotAvailableText,
+            style: const TextStyle(
+              fontSize: 14,
             ),
           ),
           const SizedBox(height: 30),
-          CustomMaterialButton(
-            onPressed: () => selectAppFromStorage(context).then(
-              (_) {
-                Navigator.pop(context);
-                Navigator.pop(context);
-              },
-            ),
-            label: Row(
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(innerContext);
+              await selectAppFromStorage(context);
+            },
+            child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Icon(Icons.sd_card),
                 const SizedBox(width: 10),
-                I18nText('appSelectorView.selectFromStorageButton'),
+                Text(t.appSelectorView.selectFromStorageButton),
               ],
             ),
           ),
           const SizedBox(height: 10),
-          CustomMaterialButton(
-            isFilled: false,
+          TextButton(
             onPressed: () {
-              Navigator.pop(context);
+              Navigator.pop(innerContext);
             },
-            label: Row(
+            child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const SizedBox(width: 10),
-                I18nText('cancelButton'),
+                Text(t.cancelButton),
               ],
             ),
           ),
@@ -175,13 +259,14 @@ class AppSelectorViewModel extends BaseViewModel {
 
   Future<void> selectAppFromStorage(BuildContext context) async {
     try {
-      final FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['apk'],
+      final String? result = await FlutterFileDialog.pickFile(
+        params: const OpenFileDialogParams(
+          mimeTypesFilter: ['application/vnd.android.package-archive'],
+        ),
       );
-      if (result != null && result.files.single.path != null) {
-        final File apkFile = File(result.files.single.path!);
-        final List<String> pathSplit = result.files.single.path!.split('/');
+      if (result != null) {
+        final File apkFile = File(result);
+        final List<String> pathSplit = result.split('/');
         pathSplit.removeLast();
         final Directory filePickerCacheDir = Directory(pathSplit.join('/'));
         final Iterable<File> deletableFiles =
@@ -196,25 +281,15 @@ class AppSelectorViewModel extends BaseViewModel {
           apkFile.path,
           true,
         ) as ApplicationWithIcon?;
-        if (application != null) {
-          locator<PatcherViewModel>().selectedApp = PatchedApplication(
-            name: application.appName,
-            packageName: application.packageName,
-            originalPackageName: application.packageName,
-            version: application.versionName!,
-            apkFilePath: result.files.single.path!,
-            icon: application.icon,
-            patchDate: DateTime.now(),
-            isFromStorage: true,
-          );
-          locator<PatcherViewModel>().loadLastSelectedPatches();
+        if (application != null && context.mounted) {
+          await selectApp(context, application, true);
         }
       }
     } on Exception catch (e) {
       if (kDebugMode) {
         print(e);
       }
-      _toast.showBottom('appSelectorView.errorMessage');
+      _toast.showBottom(t.appSelectorView.errorMessage);
     }
   }
 
@@ -224,7 +299,8 @@ class AppSelectorViewModel extends BaseViewModel {
           (app) =>
               query.isEmpty ||
               query.length < 2 ||
-              app.appName.toLowerCase().contains(query.toLowerCase()),
+              app.appName.toLowerCase().contains(query.toLowerCase()) ||
+              app.packageName.toLowerCase().contains(query.toLowerCase()),
         )
         .toList();
   }
@@ -241,5 +317,5 @@ class AppSelectorViewModel extends BaseViewModel {
   }
 
   void showDownloadToast() =>
-      _toast.showBottom('appSelectorView.downloadToast');
+      _toast.showBottom(t.appSelectorView.downloadToast);
 }

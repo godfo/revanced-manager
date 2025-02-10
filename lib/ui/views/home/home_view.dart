@@ -1,17 +1,16 @@
-import 'package:animations/animations.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_i18n/flutter_i18n.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:revanced_manager/app/app.locator.dart';
+import 'package:revanced_manager/gen/strings.g.dart';
 import 'package:revanced_manager/ui/views/home/home_viewmodel.dart';
-import 'package:revanced_manager/ui/widgets/homeView/available_updates_card.dart';
 import 'package:revanced_manager/ui/widgets/homeView/installed_apps_card.dart';
+import 'package:revanced_manager/ui/widgets/homeView/last_patched_app_card.dart';
 import 'package:revanced_manager/ui/widgets/homeView/latest_commit_card.dart';
 import 'package:revanced_manager/ui/widgets/shared/custom_sliver_app_bar.dart';
 import 'package:stacked/stacked.dart';
 
 class HomeView extends StatelessWidget {
-  const HomeView({Key? key}) : super(key: key);
+  const HomeView({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -22,18 +21,17 @@ class HomeView extends StatelessWidget {
       viewModelBuilder: () => locator<HomeViewModel>(),
       builder: (context, model, child) => Scaffold(
         body: RefreshIndicator(
-          onRefresh: () => model.forceRefresh(context),
+          edgeOffset: 110.0,
+          displacement: 10.0,
+          onRefresh: () async => await model.forceRefresh(context),
           child: CustomScrollView(
             slivers: <Widget>[
               CustomSliverAppBar(
                 isMainView: true,
-                title: I18nText(
-                  'homeView.widgetTitle',
-                  child: Text(
-                    '',
-                    style: GoogleFonts.inter(
-                      color: Theme.of(context).textTheme.titleLarge!.color,
-                    ),
+                title: Text(
+                  t.homeView.widgetTitle,
+                  style: GoogleFonts.inter(
+                    color: Theme.of(context).textTheme.titleLarge!.color,
                   ),
                 ),
               ),
@@ -42,94 +40,34 @@ class HomeView extends StatelessWidget {
                 sliver: SliverList(
                   delegate: SliverChildListDelegate.fixed(
                     <Widget>[
-                      I18nText(
-                        'homeView.updatesSubtitle',
-                        child: Text(
-                          '',
-                          style: Theme.of(context).textTheme.titleLarge,
-                        ),
+                      Text(
+                        t.homeView.updatesSubtitle,
+                        style: Theme.of(context).textTheme.titleLarge,
                       ),
                       const SizedBox(height: 10),
-                      LatestCommitCard(
-                        onPressedManager: () =>
-                            model.showUpdateConfirmationDialog(context),
-                        onPressedPatches: () => model.forceRefresh(context),
-                      ),
+                      LatestCommitCard(model: model, parentContext: context),
                       const SizedBox(height: 23),
-                      I18nText(
-                        'homeView.patchedSubtitle',
-                        child: Text(
-                          '',
-                          style: Theme.of(context).textTheme.titleLarge,
+                      Visibility(
+                        visible: model.isLastPatchedAppEnabled(),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              t.homeView.lastPatchedAppSubtitle,
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
+                            const SizedBox(height: 10),
+                            LastPatchedAppCard(),
+                            const SizedBox(height: 10),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: <Widget>[
-                          ActionChip(
-                            avatar: const Icon(Icons.grid_view),
-                            label: I18nText('homeView.installed'),
-                            side: BorderSide(
-                              color: model.showUpdatableApps
-                                  ? Theme.of(context).colorScheme.outline
-                                  : Theme.of(context)
-                                      .colorScheme
-                                      .secondaryContainer,
-                              width: model.showUpdatableApps ? 1 : 1,
-                            ),
-                            backgroundColor: model.showUpdatableApps
-                                ? Theme.of(context).colorScheme.background
-                                : Theme.of(context)
-                                    .colorScheme
-                                    .secondaryContainer,
-                            onPressed: () {
-                              model.toggleUpdatableApps(false);
-                            },
-                          ),
-                          const SizedBox(width: 10),
-                          ActionChip(
-                            avatar: const Icon(Icons.update),
-                            label: I18nText('homeView.updatesAvailable'),
-                            side: BorderSide(
-                              color: !model.showUpdatableApps
-                                  ? Theme.of(context).colorScheme.outline
-                                  : Theme.of(context)
-                                      .colorScheme
-                                      .secondaryContainer,
-                              width: !model.showUpdatableApps ? 1 : 1,
-                            ),
-                            backgroundColor: !model.showUpdatableApps
-                                ? Theme.of(context).colorScheme.background
-                                : Theme.of(context)
-                                    .colorScheme
-                                    .secondaryContainer,
-                            onPressed: () {
-                              model.toggleUpdatableApps(true);
-                            },
-                          ),
-                        ],
+                      Text(
+                        t.homeView.patchedSubtitle,
+                        style: Theme.of(context).textTheme.titleLarge,
                       ),
-                      const SizedBox(height: 14),
-                      PageTransitionSwitcher(
-                        transitionBuilder:
-                            (child, primaryAnimation, secondaryAnimation) {
-                          return FadeThroughTransition(
-                            animation: primaryAnimation,
-                            secondaryAnimation: secondaryAnimation,
-                            fillColor: Colors.transparent,
-                            child: child,
-                          );
-                        },
-                        layoutBuilder: (entries) {
-                          return Stack(
-                            alignment: Alignment.topCenter,
-                            children: entries,
-                          );
-                        },
-                        child: model.showUpdatableApps
-                            ? AvailableUpdatesCard()
-                            : InstalledAppsCard(),
-                      ),
+                      const SizedBox(height: 10),
+                      InstalledAppsCard(),
                     ],
                   ),
                 ),

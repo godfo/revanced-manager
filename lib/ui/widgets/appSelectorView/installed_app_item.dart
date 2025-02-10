@@ -1,11 +1,11 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:flutter_i18n/flutter_i18n.dart';
+import 'package:revanced_manager/gen/strings.g.dart';
 import 'package:revanced_manager/ui/widgets/shared/custom_card.dart';
 
 class InstalledAppItem extends StatefulWidget {
   const InstalledAppItem({
-    Key? key,
+    super.key,
     required this.name,
     required this.pkgName,
     required this.icon,
@@ -13,7 +13,9 @@ class InstalledAppItem extends StatefulWidget {
     required this.suggestedVersion,
     required this.installedVersion,
     this.onTap,
-  }) : super(key: key);
+    this.onLinkTap,
+  });
+
   final String name;
   final String pkgName;
   final Uint8List icon;
@@ -21,6 +23,7 @@ class InstalledAppItem extends StatefulWidget {
   final String suggestedVersion;
   final String installedVersion;
   final Function()? onTap;
+  final Function()? onLinkTap;
 
   @override
   State<InstalledAppItem> createState() => _InstalledAppItemState();
@@ -51,48 +54,76 @@ class _InstalledAppItemState extends State<InstalledAppItem> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text(
-                    widget.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.visible,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  Text(widget.pkgName),
-                  I18nText(
-                    FlutterI18n.translate(
-                      context,
-                      'installed',
-                      translationParams: {
-                        'version': 'v${widget.installedVersion}'
-                      },
-                    ),
-                  ),
-                  Row(
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 4,
                     children: [
-                      I18nText(
-                        'suggested',
-                        translationParams: {
-                          'version': widget.suggestedVersion.isEmpty
-                              ? FlutterI18n.translate(
-                                  context,
-                                  'appSelectorCard.allVersions',
-                                )
-                              : 'v${widget.suggestedVersion}',
-                        },
+                      Text(
+                        widget.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 16,
+                        ),
                       ),
-                      const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          widget.patchesCount == 1
-                              ? '• ${widget.patchesCount} patch'
-                              : '• ${widget.patchesCount} patches',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.secondary,
+                      Text(
+                        widget.installedVersion,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 16,
+                        ),
+                      ),
+                      Text(
+                        widget.patchesCount == 1
+                            ? '• ${widget.patchesCount} patch'
+                            : '• ${widget.patchesCount} patches',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Theme.of(context).colorScheme.secondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    widget.pkgName,
+                  ),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Material(
+                        color: Theme.of(context).colorScheme.secondaryContainer,
+                        borderRadius:
+                            const BorderRadius.all(Radius.circular(8)),
+                        child: InkWell(
+                          onTap: widget.onLinkTap,
+                          borderRadius:
+                              const BorderRadius.all(Radius.circular(8)),
+                          child: Container(
+                            padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  t.suggested(
+                                    version: widget.suggestedVersion.isEmpty
+                                        ? t.appSelectorCard.anyVersion
+                                        : 'v${widget.suggestedVersion}',
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                Icon(
+                                  Icons.search,
+                                  size: 16,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSecondaryContainer,
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),

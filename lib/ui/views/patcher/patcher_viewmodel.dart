@@ -1,16 +1,20 @@
 // ignore_for_file: use_build_context_synchronously
 
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_i18n/flutter_i18n.dart';
+import 'package:flutter/services.dart';
 import 'package:injectable/injectable.dart';
 import 'package:revanced_manager/app/app.locator.dart';
 import 'package:revanced_manager/app/app.router.dart';
+import 'package:revanced_manager/gen/strings.g.dart';
 import 'package:revanced_manager/models/patch.dart';
 import 'package:revanced_manager/models/patched_application.dart';
 import 'package:revanced_manager/services/manager_api.dart';
 import 'package:revanced_manager/services/patcher_api.dart';
-import 'package:revanced_manager/ui/widgets/shared/custom_material_button.dart';
 import 'package:revanced_manager/utils/about_info.dart';
+import 'package:revanced_manager/utils/check_for_supported_patch.dart';
 import 'package:stacked/stacked.dart';
 import 'package:stacked_services/stacked_services.dart';
 
@@ -19,8 +23,12 @@ class PatcherViewModel extends BaseViewModel {
   final NavigationService _navigationService = locator<NavigationService>();
   final ManagerAPI _managerAPI = locator<ManagerAPI>();
   final PatcherAPI _patcherAPI = locator<PatcherAPI>();
+  Set<String> savedPatchNames = {};
   PatchedApplication? selectedApp;
+  BuildContext? ctx;
   List<Patch> selectedPatches = [];
+  List<String> removedPatches = [];
+  List<String> newPatches = [];
 
   void navigateToAppSelector() {
     _navigationService.navigateTo(Routes.appSelectorView);
@@ -42,75 +50,104 @@ class PatcherViewModel extends BaseViewModel {
     return selectedApp == null;
   }
 
-  Future<bool> isValidPatchConfig() async {
-    final bool needsResourcePatching = await _patcherAPI.needsResourcePatching(
-      selectedPatches,
-    );
-    if (needsResourcePatching && selectedApp != null) {
-      final bool isSplit = await _managerAPI.isSplitApk(selectedApp!);
-      return !isSplit;
+  bool showRemovedPatchesDialog(BuildContext context) {
+    if (removedPatches.isNotEmpty) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(t.notice),
+          content: SingleChildScrollView(
+            child: Text(
+              t.patcherView.removedPatchesWarningDialogText(
+                patches: removedPatches.join('\n'),
+                newPatches: newPatches.isNotEmpty
+                    ? t.patcherView.addedPatchesDialogText(
+                        addedPatches: newPatches.join('\n'),
+                      )
+                    : '',
+              ),
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: Text(t.noButton),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                showIncompatibleArchWarningDialog(context);
+              },
+              child: Text(t.yesButton),
+            ),
+          ],
+        ),
+      );
+      return false;
     }
     return true;
   }
 
-  Future<void> showPatchConfirmationDialog(BuildContext context) async {
-    final bool isValid = await isValidPatchConfig();
-    if (context.mounted) {
-      if (isValid) {
-        showArmv7WarningDialog(context);
-      } else {
-        return showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: I18nText('warning'),
-            backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
-            content: I18nText('patcherView.splitApkWarningDialogText'),
-            actions: <Widget>[
-              CustomMaterialButton(
-                label: I18nText('noButton'),
-                onPressed: () => Navigator.of(context).pop(),
-              ),
-              CustomMaterialButton(
-                label: I18nText('yesButton'),
-                isFilled: false,
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  showArmv7WarningDialog(context);
-                },
-              )
-            ],
-          ),
-        );
-      }
+  bool checkRequiredPatchOption(BuildContext context) {
+    if (getNullRequiredOptions(selectedPatches, selectedApp!.packageName)
+        .isNotEmpty) {
+      showRequiredOptionDialog(context);
+      return false;
     }
+    return true;
   }
 
-  Future<void> showArmv7WarningDialog(BuildContext context) async {
-    final bool armv7 = await AboutInfo.getInfo().then((info) {
+  void showRequiredOptionDialog([context]) {
+    showDialog(
+      context: context ?? ctx,
+      builder: (context) => AlertDialog(
+        title: Text(t.notice),
+        content: Text(t.patcherView.requiredOptionDialogText),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => {
+              Navigator.of(context).pop(),
+            },
+            child: Text(t.cancelButton),
+          ),
+          FilledButton(
+            onPressed: () => {
+              Navigator.pop(context),
+              navigateToPatchesSelector(),
+            },
+            child: Text(t.okButton),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> showIncompatibleArchWarningDialog(BuildContext context) async {
+    final bool notSupported = await AboutInfo.getInfo().then((info) {
       final List<String> archs = info['supportedArch'];
-      final supportedAbis = ['arm64-v8a', 'x86', 'x86_64'];
+      final supportedAbis = ['arm64-v8a', 'x86', 'x86_64', 'armeabi-v7a'];
       return !archs.any((arch) => supportedAbis.contains(arch));
     });
-    if (context.mounted && armv7) {
+    if (context.mounted && notSupported) {
       return showDialog(
         context: context,
         builder: (context) => AlertDialog(
-          title: I18nText('warning'),
-          backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
-          content: I18nText('patcherView.armv7WarningDialogText'),
+          title: Text(t.warning),
+          content: Text(t.patcherView.incompatibleArchWarningDialogText),
           actions: <Widget>[
-            CustomMaterialButton(
-              label: I18nText('noButton'),
+            FilledButton(
               onPressed: () => Navigator.of(context).pop(),
+              child: Text(t.noButton),
             ),
-            CustomMaterialButton(
-              label: I18nText('yesButton'),
-              isFilled: false,
+            TextButton(
               onPressed: () {
                 Navigator.of(context).pop();
                 navigateToInstaller();
               },
-            )
+              child: Text(t.yesButton),
+            ),
           ],
         ),
       );
@@ -120,42 +157,96 @@ class PatcherViewModel extends BaseViewModel {
   }
 
   String getAppSelectionString() {
-    String text = '${selectedApp!.name} (${selectedApp!.packageName})';
-    if (text.length > 32) {
-      text = '${text.substring(0, 32)}...)';
-    }
-    return text;
+    return '${selectedApp!.name} ${selectedApp!.version}';
+  }
+
+  Future<void> queryVersion(String suggestedVersion) async {
+    await openDefaultBrowser(
+      '${selectedApp!.packageName} apk version $suggestedVersion',
+    );
   }
 
   String getSuggestedVersionString(BuildContext context) {
-    String suggestedVersion =
-        _patcherAPI.getSuggestedVersion(selectedApp!.packageName);
-    if (suggestedVersion.isEmpty) {
-      suggestedVersion = FlutterI18n.translate(
-        context,
-        'appSelectorCard.allVersions',
-      );
+    return _patcherAPI.getSuggestedVersion(selectedApp!.packageName);
+  }
+
+  Future<void> openDefaultBrowser(String query) async {
+    if (Platform.isAndroid) {
+      try {
+        const platform = MethodChannel('app.revanced.manager.flutter/browser');
+        await platform.invokeMethod('openBrowser', {'query': query});
+      } catch (e) {
+        if (kDebugMode) {
+          print(e);
+        }
+      }
     } else {
-      suggestedVersion = 'v$suggestedVersion';
+      throw 'Platform not supported';
     }
-    return '${FlutterI18n.translate(
-      context,
-      'appSelectorCard.currentVersion',
-    )}: v${selectedApp!.version}\n${FlutterI18n.translate(
-      context,
-      'appSelectorCard.suggestedVersion',
-    )}: $suggestedVersion';
+  }
+
+  bool isPatchNew(Patch patch) {
+    if (savedPatchNames.isEmpty) {
+      savedPatchNames = _managerAPI
+          .getSavedPatches(selectedApp!.packageName)
+          .map((p) => p.name)
+          .toSet();
+    }
+    if (savedPatchNames.isEmpty) {
+      return false;
+    }
+    return !savedPatchNames.contains(patch.name);
   }
 
   Future<void> loadLastSelectedPatches() async {
     this.selectedPatches.clear();
+    removedPatches.clear();
+    newPatches.clear();
     final List<String> selectedPatches =
-        await _managerAPI.getSelectedPatches(selectedApp!.originalPackageName);
+        await _managerAPI.getSelectedPatches(selectedApp!.packageName);
     final List<Patch> patches =
-        _patcherAPI.getFilteredPatches(selectedApp!.originalPackageName);
+        _patcherAPI.getFilteredPatches(selectedApp!.packageName);
     this
         .selectedPatches
         .addAll(patches.where((patch) => selectedPatches.contains(patch.name)));
+    if (!_managerAPI.isPatchesChangeEnabled()) {
+      this.selectedPatches.clear();
+      this.selectedPatches.addAll(patches.where((patch) => !patch.excluded));
+    }
+    if (_managerAPI.isVersionCompatibilityCheckEnabled()) {
+      this.selectedPatches.removeWhere((patch) => !isPatchSupported(patch));
+    }
+    if (!_managerAPI.areUniversalPatchesEnabled()) {
+      this
+          .selectedPatches
+          .removeWhere((patch) => patch.compatiblePackages.isEmpty);
+    }
+    this.selectedPatches.addAll(
+          patches.where(
+            (patch) =>
+                isPatchNew(patch) &&
+                !patch.excluded &&
+                !this.selectedPatches.contains(patch),
+          ),
+        );
+    final usedPatches = _managerAPI.getUsedPatches(selectedApp!.packageName);
+    for (final patch in usedPatches) {
+      if (!patches.any((p) => p.name == patch.name)) {
+        removedPatches.add('• ${patch.name}');
+        for (final option in patch.options) {
+          _managerAPI.clearPatchOption(
+            selectedApp!.packageName,
+            patch.name,
+            option.key,
+          );
+        }
+      }
+    }
+    for (final patch in patches) {
+      if (isPatchNew(patch)) {
+        newPatches.add('• ${patch.name}');
+      }
+    }
     notifyListeners();
   }
 }
